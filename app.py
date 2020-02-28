@@ -46,6 +46,8 @@ def repl_run(lines):
         except Exception: pass
 
 FETCH_SCRIPT = r'''from collections import defaultdict
+from talon import registry
+from talon.legacy.voice import Key
 import json
 try:
     from user import std
@@ -56,45 +58,27 @@ except Exception:
 response = {'contexts': {}}
 response['alnum'] = alnum
 
-for name, ctx in voice.talon.subs.items():
-    d = response['contexts'][ctx.name] = {
-        'active': ctx in voice.talon.active,
+def pretty(target):
+    if isinstance(target, Key):
+        return f'key({target.data})'
+    elif callable(target):
+        return f'{target.__name__}()'
+    elif isinstance(target, list):
+        return ' '.join([pretty(v) for v in target])
+    else:
+        return repr(target)
+
+active_contexts = registry.active_contexts()
+
+for name, ctx in registry.contexts.items():
+    d = response['contexts'][name] = {
+        'active': ctx in active_contexts,
         'commands': [],
     }
     commands = d['commands']
-    for trigger, rule in ctx.triggers.items():
-        if trigger.split(' ')[-1] in alnum:
-            continue
-        actions = ctx.mapping[rule]
-        if not isinstance(actions, (list, tuple)):
-            actions = [actions]
-        if len(actions) > 1 and all(isinstance(a, voice.Key) for a in actions):
-            if len(set(a.data for a in actions)) == 1:
-                commands.append((trigger, f'key({actions[0].data}) * {len(actions)}'))
-                continue
-        pretty = []
-        for action in actions:
-            if isinstance(action, voice.Key):
-                keys = action.data.split(' ')
-                if len(keys) > 1 and len(set(keys)) == 1:
-                    pretty.append(f'key({keys[0]}) * {len(keys)}')
-                else:
-                    pretty.append(f'key({action.data})')
-            elif isinstance(action, voice.Str):
-                pretty.append(f'"{action.data}"')
-            elif isinstance(action, voice.Rep):
-                pretty.append(f'repeat({action.data})')
-            elif isinstance(action, voice.RepPhrase):
-                pretty.append(f'repeat_phrase({action.data})')
-            elif isinstance(action, str):
-                pretty.append(f'"{action}"')
-            elif callable(action):
-                pretty.append(f'{action.__name__}()')
-            else:
-                pretty.append(str(action))
-        if len(pretty) == 1:
-            pretty = pretty[0]
-        commands.append((trigger, pretty))
+    for impl in ctx.commands.values():
+        desc = pretty(impl.target)
+        commands.append((impl.rule.rule, desc))
 
 print(json.dumps(response))
 '''
@@ -125,7 +109,7 @@ def slash():
     for name, ctx in grammar['contexts'].items():
         ctx['commands'] = [fixup(trigger, cmd)
                            for trigger, cmd in ctx['commands']]
-    alpha = zip(grammar['alnum'], string.lowercase)
+    alpha = map(str.lower, grammar['alnum'])
     return render_template('index.html', contexts=grammar['contexts'], alpha=alpha)
 
 if __name__ == '__main__':
